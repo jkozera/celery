@@ -287,9 +287,7 @@ class TaskSetResult(object):
 
         while True:
             for position, pending_result in enumerate(self.subtasks):
-                if isinstance(results[position], results.UnfilledPosition) and \
-                  pending_result.status in ["DONE", "FAILURE"]:
-                    results[position] = callback(pending_result.result)
+                if isinstance(results[position], results.UnfilledPosition):
                     if pending_result.status == "DONE":
                         results[position] = callback(pending_result.result)
                     elif pending_result.status == "FAILURE":
