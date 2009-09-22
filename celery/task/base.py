@@ -642,6 +642,12 @@ def set_exit_handler(handler=SIG_DFL):
 
 
 class ResumableTaskSet(TaskSet):
+    """Special TaskSet subclass which allows two initialization modes:
+     - by run_from_args method - works in the same way as TaskSet
+     - by continue_from_cts method - gets task results from ChildTaskSetTask
+       model
+    """
+    
     def __init__(self):
         pass
     
@@ -656,7 +662,26 @@ class ResumableTaskSet(TaskSet):
             
 
 class ResumableTaskSetTask(Task):
+    """A task that supports creating taskset and saving its state to database.
+    
+    Implemented in a way that allows terminating Celery while executing TaskSet
+    - it is continued after starting by using information saved to DB.
+
+    All subclasses of :class:`ResumableTaskSetTask` must define the
+    :meth:`is_running` method, which should return boolean value indicating
+    if task with current id already started. It is used to forbid creating
+    duplicate TaskSets, so you can make it always return False to force always
+    creating new TaskSet.
+    """
+    
+    def is_running(self):
+        raise NotImplementedError("ResumableTaskSetTask must have an is_running attribute")
+    
     def run_taskset(self, task, args, task_id):
+        """Creates TaskSetResult from task and arguments like TaskSet.run() does,
+        but doesn't create new tasks if they are already running
+        """
+        
         ts = ResumableTaskSet()
         if hasattr(self, 'cts'):
             child_task_set = self.cts
@@ -677,6 +702,9 @@ class ResumableTaskSetTask(Task):
         return ts_result
 
     def run(self, *args, **kwargs):
+        """Should be called by derived classes. Sets SIGHUP and SIGTERM handlers
+        to SIG_IGN and gets information from DB about already running task set.
+        """
         set_exit_handler(SIG_IGN) # we must save taskset information to DB so that it can be resumed after restarting celery
         try:
             cts = TaskMeta.objects.get_task(kwargs['task_id']).childtaskset
@@ -691,4 +719,6 @@ class ResumableTaskSetTask(Task):
         return True
     
     def cleanup(self):
+        """This method is called before exiting celery. Should do cleanup like
+        releasing locks, etc."""
         pass
