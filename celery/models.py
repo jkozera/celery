@@ -73,6 +73,16 @@ class PeriodicTaskMeta(models.Model):
         return tasks[self.name]
 
 
+class ChildTaskSet(models.Model):
+    parent_task = models.OneToOneField(TaskMeta)
+    paused = models.BooleanField(default=False)
+
+    
+class ChildTaskSetTask(models.Model):
+    taskset = models.ForeignKey(ChildTaskSet, related_name='subtasks')
+    task = models.ForeignKey(TaskMeta, unique=True)
+
+
 if (django.VERSION[0], django.VERSION[1]) >= (1, 1):
     # keep models away from syncdb/reset if database backend is not being used.
     if conf.CELERY_BACKEND != 'database':

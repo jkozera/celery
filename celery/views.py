@@ -1,7 +1,9 @@
 """celery.views"""
 from django.http import HttpResponse, Http404
+from django.shortcuts import get_object_or_404
 from celery.task import tasks, is_done, apply_async
 from celery.result import AsyncResult
+from celery.models import ChildTaskSet
 from anyjson import serialize as JSON_dump
 
 
@@ -54,3 +56,10 @@ def task_status(request, task_id):
         }
     return HttpResponse(JSON_dump({"task": response_data}),
             mimetype="application/json")
+    
+    
+def taskset_progress(request, task_id):
+    ts = get_object_or_404(ChildTaskSet, parent_task__task_id=task_id)
+    return HttpResponse(str(100 * ts.subtasks.filter(task__status__in=('DONE','FAILURE')).count() / ts.subtasks.count()),
+                        mimetype="application/json") 
+    

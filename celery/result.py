@@ -253,13 +253,20 @@ class TaskSetResult(object):
                 elif pending_result.status == "FAILURE":
                     raise pending_result.result
 
-    def join(self, timeout=None):
+    def join(self, timeout=None, callback=lambda r: r, save_exceptions=False):
         """Gather the results for all of the tasks in the taskset,
         and return a list with them ordered by the order of which they
         were called.
 
         :keyword timeout: The time in seconds, how long
             it will wait for results, before the operation times out.
+
+        :keyword callback: Function that should be called when result is being
+            saved. Should return value that should be saved to the list
+            
+        :keyword save_exceptions: If exceptions should be saved to results list,
+            instead of being raised
+            
 
         :raises celery.exceptions.TimeoutError: if ``timeout`` is not ``None``
             and the operation takes longer than ``timeout`` seconds.
@@ -280,10 +287,16 @@ class TaskSetResult(object):
 
         while True:
             for position, pending_result in enumerate(self.subtasks):
-                if pending_result.status == "DONE":
-                    results[position] = pending_result.result
-                elif pending_result.status == "FAILURE":
-                    raise pending_result.result
+                if isinstance(results[position], results.UnfilledPosition) and \
+                  pending_result.status in ["DONE", "FAILURE"]:
+                    results[position] = callback(pending_result.result)
+                    if pending_result.status == "DONE":
+                        results[position] = callback(pending_result.result)
+                    elif pending_result.status == "FAILURE":
+                        if save_exceptions:
+                            results[position] = callback(pending_result.result)
+                        else:
+                            raise pending_result.result
             if results.full():
                 # Make list copy, so the returned type is not a position
                 # queue.

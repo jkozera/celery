@@ -8,7 +8,7 @@ from celery.messaging import TaskConsumer
 from celery.conf import AMQP_CONNECTION_TIMEOUT
 from celery.registry import tasks
 from celery.backends import default_backend
-from celery.task.base import Task, TaskSet, PeriodicTask
+from celery.task.base import Task, TaskSet, PeriodicTask, ResumableTaskSetTask
 from celery.task.base import ExecuteRemoteTask
 from celery.task.base import AsynchronousMapTask
 from celery.task.builtins import DeleteExpiredTaskMetaTask, PingTask

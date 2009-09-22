@@ -8,7 +8,11 @@ from celery.utils import gen_unique_id, get_full_cls_name
 from celery.registry import tasks
 from celery.serialization import pickle
 from celery.exceptions import MaxRetriesExceededError, RetryTaskError
+from celery.result import AsyncResult
+from celery.models import TaskMeta, ChildTaskSet
 from datetime import timedelta
+from signal import SIGTERM, SIGINT, SIG_IGN, SIG_DFL, signal
+import sys
 
 
 class Task(object):
@@ -630,3 +634,61 @@ class PeriodicTask(Task):
             self.__class__.run_every = timedelta(seconds=self.run_every)
 
         super(PeriodicTask, self).__init__()
+
+
+def set_exit_handler(handler=SIG_DFL):
+    signal(SIGTERM, handler)
+    signal(SIGINT, handler)
+
+
+class ResumableTaskSet(TaskSet):
+    def __init__(self):
+        pass
+    
+    def run_from_args(self, *args, **kwargs):
+        super(ResumableTaskSet, self).__init__(*args, **kwargs)
+        return super(ResumableTaskSet, self).run()
+        
+    def continue_from_cts(self, cts):
+        results = [AsyncResult(st.task.task_id) for st in cts.subtasks.all()]
+        return TaskSetResult('', # taskset_id is unused in TaskSetResult at least in celery 0.6.0
+                             results)
+            
+
+class ResumableTaskSetTask(Task):
+    def run_taskset(self, task, args, task_id):
+        ts = ResumableTaskSet()
+        if hasattr(self, 'cts'):
+            child_task_set = self.cts
+            ts_result = ts.continue_from_cts(child_task_set)
+        else:
+            ts_result = ts.run_from_args(task, args)
+            taskmeta = TaskMeta.objects.get_task(task_id)
+            child_task_set = ChildTaskSet(parent_task=taskmeta)
+            child_task_set.save()
+            for result in ts_result.subtasks:
+                child_task_set.subtasks.create(task=TaskMeta.objects.get_task(result.task_id))
+        def exit_handler(signum, frame):
+            child_task_set.paused = True
+            child_task_set.save()
+            self.cleanup()
+            sys.exit(1)
+        set_exit_handler(exit_handler)
+        return ts_result
+
+    def run(self, *args, **kwargs):
+        set_exit_handler(SIG_IGN) # we must save taskset information to DB so that it can be resumed after restarting celery
+        try:
+            cts = TaskMeta.objects.get_task(kwargs['task_id']).childtaskset
+        except ChildTaskSet.DoesNotExist:
+            return not self.is_running() # if we're started, we can't continue if we don't have cts
+        if cts.paused:
+            cts.paused = False
+            cts.save()
+            self.cts = cts
+        else: # task terminated abnormally - don't continue..
+            return False
+        return True
+    
+    def cleanup(self):
+        pass
